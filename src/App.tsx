@@ -2,6 +2,20 @@ import type { FC } from 'react';
 import { useRef, useState } from 'react';
 import ProgressBar from './components/ProgressBar';
 
+// Helper to convert ReadableStream<string> to async iterable
+async function* streamToAsyncIterable(stream: ReadableStream<string>) {
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 const App: FC = () => {
   const [progress, setProgress] = useState(0);
   const summarizerRef = useRef<Summarizer | null>(null);
@@ -36,10 +50,16 @@ const App: FC = () => {
 
     console.log({ totalInputQuota, inputUsage });
 
-    outputDivRef.current.innerHTML = await summarizer.summarize(inputContent, {
+    const stream = summarizer.summarizeStreaming(inputContent, {
       context: undefined,
       signal: undefined,
     });
+
+    for await (const chunk of streamToAsyncIterable(stream)) {
+      outputDivRef.current.innerHTML += chunk;
+    }
+
+    summarizer.destroy();
   };
 
   return (
