@@ -1,79 +1,66 @@
-import type { FC } from 'react';
-import { useRef, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import ProgressBar from './components/ProgressBar';
-
-// Helper to convert ReadableStream<string> to async iterable
-async function* streamToAsyncIterable(stream: ReadableStream<string>) {
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      yield value;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
+import {
+  type ChatCompletionMessageParam,
+  CreateMLCEngine,
+  prebuiltAppConfig,
+} from '@mlc-ai/web-llm';
 
 const App: FC = () => {
   const [progress, setProgress] = useState(0);
-  const summarizerRef = useRef<Summarizer | null>(null);
-  const outputDivRef = useRef<HTMLDivElement | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [output, setOutput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const loadingRef = useRef<HTMLDivElement>(null);
 
-  const startInstall = async () => {
-    if (!outputDivRef.current) return;
+  useEffect(() => {
+    console.log({ prebuiltAppConfig });
+  }, []);
 
-    outputDivRef.current.innerHTML = '';
-    const summarizer = await Summarizer.create({
-      sharedContext: undefined,
-      type: 'tldr',
-      length: 'long',
-      format: 'plain-text',
-      monitor(monitor) {
-        monitor.addEventListener('downloadprogress', (e) => {
-          setProgress(e.loaded);
-          console.log(`Downloaded ${Math.floor(e.loaded * 100)}%`);
-        });
+  const handleGenerate = async () => {
+    setLoading(true);
+    setProgress(0);
+
+    const engine = await CreateMLCEngine('Llama-3.2-1B-Instruct-q4f16_1-MLC', {
+      initProgressCallback: (info) => {
+        setProgress(info.progress);
+        if (loadingRef.current) loadingRef.current.innerHTML = info.text;
+        console.log({ info });
       },
     });
-    summarizerRef.current = summarizer;
-    console.log({ summarizer });
 
-    const inputContent = inputRef.current?.value ?? '';
-    const totalInputQuota = summarizer.inputQuota;
-    const inputUsage = await summarizer.measureInputUsage(inputContent, {
-      context: undefined,
-      signal: undefined,
-    });
+    const messages: ChatCompletionMessageParam[] = [
+      {
+        role: 'system',
+        content:
+          'Your job is to summarize provided press releases for a non-technical audience. Output should be plain text without any formatting.',
+      },
+      { role: 'user', content: inputRef.current?.value || '' },
+    ];
 
-    console.log({ totalInputQuota, inputUsage });
+    const reply = await engine.chat.completions.create({ messages });
 
-    const stream = summarizer.summarizeStreaming(inputContent, {
-      context: undefined,
-      signal: undefined,
-    });
+    console.log({ reply });
 
-    for await (const chunk of streamToAsyncIterable(stream)) {
-      outputDivRef.current.innerHTML += chunk;
-    }
-
-    summarizer.destroy();
+    setOutput(reply.choices[0].message.content || '');
   };
 
   return (
     <div className="max-w-6xl mx-auto my-3 px-4">
       <textarea ref={inputRef} className="block border border-gray-400 mb-2 w-full" />
       <button
-        onClick={startInstall}
+        onClick={handleGenerate}
         className="bg-blue-900 text-white rounded hover:bg-blue-800 cursor-pointer py-1 px-3 mb-2"
+        disabled={loading}
       >
-        Start Summary
+        {loading ? 'Loading...' : 'Generate'}
       </button>
       <ProgressBar progress={progress} />
-      <span>Loading... {progress * 100}%</span>
-      <div ref={outputDivRef} className="mt-4" />
+      <div ref={loadingRef} className="text-sm text-gray-500 mb-2" />
+      {loading && <span>Loading... {Math.floor(progress * 100)}%</span>}
+      <div className="mt-4 whitespace-pre-wrap border p-2 min-h-[2rem] bg-gray-50 rounded">
+        {output}
+      </div>
     </div>
   );
 };
