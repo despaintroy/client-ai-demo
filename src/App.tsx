@@ -18,11 +18,6 @@ const OPTIONS = [
 const SYSTEM_PROMPT =
   'You are a helpful chat assistant. Output your response as plain text. Do not use rich text formatting. Do not use markdown.';
 
-type ReplyState =
-  | { status: 'idle' }
-  | { status: 'replying'; output: string }
-  | { status: 'done'; output: string };
-
 type EngineState =
   | {
       status: 'loadingModel';
@@ -43,16 +38,21 @@ type EngineState =
 
 const App: FC = () => {
   const [inputValue, setInputValue] = useState('');
-  const [replyState, setReplyState] = useState<ReplyState>({ status: 'idle' });
   const [engineState, setEngineState] = useState<EngineState>({
     status: 'loadingModel',
     selectedModel: OPTIONS[0].value,
     progress: 0,
     loadingMessage: '',
   });
+  // New: message history state
+  const [messages, setMessages] = useState<ChatCompletionMessageParam[]>([
+    { role: 'system', content: SYSTEM_PROMPT },
+  ]);
+  // New: track if model is replying
+  const [isReplying, setIsReplying] = useState(false);
 
   const initEngine = useCallback(async (selectedModel: string, signal: AbortSignal) => {
-    setReplyState({ status: 'idle' });
+    setIsReplying(false);
     setEngineState({
       status: 'loadingModel',
       selectedModel,
@@ -98,39 +98,60 @@ const App: FC = () => {
     return () => controller.abort();
   }, [engineState.selectedModel, initEngine]);
 
-  const handleGenerate = async () => {
-    if (engineState.status !== 'ready') return;
-
-    const { engine, selectedModel } = engineState;
-
-    setReplyState({ status: 'replying', output: '' });
-    const messages: ChatCompletionMessageParam[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: inputValue },
-    ];
+  // New: handle sending a message and updating history, with streaming output
+  const handleSend = async () => {
+    if (engineState.status !== 'ready' || !inputValue.trim()) return;
+    const { engine } = engineState;
+    const userMessage: ChatCompletionMessageParam = { role: 'user', content: inputValue };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setInputValue('');
+    setIsReplying(true);
     let reply = '';
-    setReplyState({ status: 'replying', output: reply });
+    // Add a placeholder assistant message for streaming
+    setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
     const chunks = await engine.chat.completions.create({
-      messages,
+      messages: newMessages,
       temperature: 0.5,
       stream: true,
       stream_options: { include_usage: true },
     });
     for await (const chunk of chunks) {
       reply += chunk.choices[0]?.delta.content || '';
-      setReplyState({ status: 'replying', output: reply });
+      setMessages((prev) => {
+        const updated = [...prev];
+        const lastIndex = updated.length - 1;
+        if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+          updated[lastIndex] = { ...updated[lastIndex], content: reply };
+        }
+        return updated;
+      });
     }
-    const fullReply = await engine.getMessage(selectedModel);
-    setReplyState({ status: 'done', output: fullReply });
+    setIsReplying(false);
   };
 
   return (
     <div className="max-w-6xl mx-auto my-3 px-4">
+      <div className="mb-4 border rounded p-2 min-h-[200px] bg-gray-50">
+        {/* Chat history */}
+        {messages
+          .filter((m) => m.role !== 'system')
+          .map((msg, idx) => {
+            const { content } = msg;
+            return (
+              <div key={idx} className="mb-2">
+                <b>{msg.role === 'user' ? 'You' : 'Assistant'}:</b>{' '}
+                {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+              </div>
+            );
+          })}
+        {/* No need for isReplying placeholder, streaming output is shown live */}
+      </div>
       <textarea
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         className="block border border-gray-400 mb-2 w-full"
-        disabled={replyState.status === 'replying'}
+        disabled={isReplying}
       />
       <select
         className="block border border-gray-400 mb-2 w-full"
@@ -142,8 +163,9 @@ const App: FC = () => {
             loadingMessage: '',
             selectedModel: e.target.value,
           });
+          setMessages([{ role: 'system', content: SYSTEM_PROMPT }]);
         }}
-        disabled={replyState.status === 'replying'}
+        disabled={isReplying}
       >
         {OPTIONS.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -161,25 +183,16 @@ const App: FC = () => {
         <div className="text-red-500 mb-2">{engineState.message}</div>
       )}
       <button
-        onClick={handleGenerate}
+        onClick={handleSend}
         className="bg-blue-900 text-white rounded hover:bg-blue-800 cursor-pointer py-1 px-3 mb-2"
-        disabled={
-          engineState.status === 'loadingModel' ||
-          replyState.status === 'replying' ||
-          !inputValue.trim()
-        }
+        disabled={engineState.status === 'loadingModel' || isReplying || !inputValue.trim()}
       >
         {(() => {
           if (engineState.status === 'loadingModel') return `Loading model...`;
-          if (replyState.status === 'replying') return 'Generating reply...';
-          return 'Generate Reply';
+          if (isReplying) return 'Generating reply...';
+          return 'Send';
         })()}
       </button>
-      {(replyState.status === 'done' || replyState.status === 'replying') && (
-        <div className="mt-4 whitespace-pre-wrap border p-2 min-h-[2rem] bg-gray-50 rounded">
-          {replyState.output}
-        </div>
-      )}
     </div>
   );
 };
