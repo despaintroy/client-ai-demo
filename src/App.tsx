@@ -1,24 +1,23 @@
 import { type FC, useCallback, useEffect, useState } from 'react';
-import ProgressBar from './components/ProgressBar';
 import {
   type ChatCompletionMessageParam,
   CreateMLCEngine,
   MLCEngine,
   prebuiltAppConfig,
 } from '@mlc-ai/web-llm';
+import Messages from './modules/Messages';
+import ModelSelector from './modules/ModelSelector';
+import { OPTIONS } from './constants';
+import { clsx } from 'clsx';
 
 console.log(prebuiltAppConfig.model_list.map((m) => m.model_id).join('\n'));
 
-const OPTIONS = [
-  { label: 'Fast — Phi 3.5 mini', value: 'Phi-3.5-mini-instruct-q4f16_1-MLC' },
-  { label: 'Balanced — Mistral 7B', value: 'Mistral-7B-Instruct-v0.3-q4f16_1-MLC' },
-  { label: 'Best — Hermes 3 (8B)', value: 'Hermes-3-Llama-3.1-8B-q4f16_1-MLC' },
-];
-
 const SYSTEM_PROMPT =
-  'You are a helpful chat assistant. Output your response as plain text. Do not use rich text formatting. Do not use markdown.';
+  'You are a helpful chat assistant. ' +
+  'You may use markdown for formatting responses. ' +
+  'Do not include links to any external resources. ';
 
-type EngineState =
+export type EngineState =
   | {
       status: 'loadingModel';
       selectedModel: string;
@@ -44,11 +43,9 @@ const App: FC = () => {
     progress: 0,
     loadingMessage: '',
   });
-  // New: message history state
   const [messages, setMessages] = useState<ChatCompletionMessageParam[]>([
     { role: 'system', content: SYSTEM_PROMPT },
   ]);
-  // New: track if model is replying
   const [isReplying, setIsReplying] = useState(false);
 
   const initEngine = useCallback(async (selectedModel: string, signal: AbortSignal) => {
@@ -112,7 +109,7 @@ const App: FC = () => {
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
     const chunks = await engine.chat.completions.create({
       messages: newMessages,
-      temperature: 0.5,
+      temperature: 0.4,
       stream: true,
       stream_options: { include_usage: true },
     });
@@ -130,69 +127,49 @@ const App: FC = () => {
     setIsReplying(false);
   };
 
+  const onChangeModel = useCallback((model: string) => {
+    setEngineState({
+      status: 'loadingModel',
+      progress: 0,
+      loadingMessage: '',
+      selectedModel: model,
+    });
+    setMessages([{ role: 'system', content: SYSTEM_PROMPT }]);
+  }, []);
+
+  const disabledSubmit = engineState.status === 'loadingModel' || isReplying;
+
   return (
-    <div className="max-w-6xl mx-auto my-3 px-4">
-      <div className="mb-4 border rounded p-2 min-h-[200px] bg-gray-50">
-        {/* Chat history */}
-        {messages
-          .filter((m) => m.role !== 'system')
-          .map((msg, idx) => {
-            const { content } = msg;
-            return (
-              <div key={idx} className="mb-2">
-                <b>{msg.role === 'user' ? 'You' : 'Assistant'}:</b>{' '}
-                {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
-              </div>
-            );
-          })}
-        {/* No need for isReplying placeholder, streaming output is shown live */}
-      </div>
+    <div className="max-w-6xl mx-auto px-4">
+      <Messages messages={messages} />
       <textarea
         value={inputValue}
+        rows={2}
         onChange={(e) => setInputValue(e.target.value)}
-        className="block border border-gray-400 mb-2 w-full"
+        className="block border border-stone-600 mb-2 w-full focus:outline-none rounded resize-none focus:border-stone-400 text-stone-300 p-2"
         disabled={isReplying}
       />
-      <select
-        className="block border border-gray-400 mb-2 w-full"
-        value={engineState.selectedModel}
-        onChange={(e) => {
-          setEngineState({
-            status: 'loadingModel',
-            progress: 0,
-            loadingMessage: '',
-            selectedModel: e.target.value,
-          });
-          setMessages([{ role: 'system', content: SYSTEM_PROMPT }]);
-        }}
-        disabled={isReplying}
-      >
-        {OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      {engineState.status === 'loadingModel' && (
-        <>
-          <ProgressBar progress={engineState.progress} />
-          <div className="text-sm text-gray-500 mb-2">{engineState.loadingMessage}</div>
-        </>
-      )}
-      {engineState.status === 'error' && (
-        <div className="text-red-500 mb-2">{engineState.message}</div>
-      )}
-      <button
-        onClick={handleSend}
-        className="bg-blue-900 text-white rounded hover:bg-blue-800 cursor-pointer py-1 px-3 mb-2"
-        disabled={engineState.status === 'loadingModel' || isReplying || !inputValue.trim()}
-      >
-        {(() => {
-          if (engineState.status === 'loadingModel') return `Loading model...`;
-          if (isReplying) return 'Generating reply...';
-          return 'Send';
-        })()}
-      </button>
+      <div className="flex justify-between items-start">
+        <ModelSelector
+          engineState={engineState}
+          onChangeModel={onChangeModel}
+          disabled={isReplying}
+        />
+        <button
+          onClick={handleSend}
+          className={clsx(
+            'bg-stone-400 text-stone-900 rounded cursor-pointer py-1 px-3 mb-2',
+            disabledSubmit ? 'opacity-50 cursor-not-allowed' : 'hover:bg-stone-500'
+          )}
+          disabled={disabledSubmit}
+        >
+          {(() => {
+            if (engineState.status === 'loadingModel') return `Loading model...`;
+            if (isReplying) return 'Generating reply...';
+            return 'Send';
+          })()}
+        </button>
+      </div>
     </div>
   );
 };

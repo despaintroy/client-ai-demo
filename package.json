@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.79",
+    "clsx": "^2.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "sass": "^1.89.1"
   },
   "devDependencies": {

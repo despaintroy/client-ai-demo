@@ -6,9 +6,9 @@ interface ProgressBarProps {
 
 const ProgressBar: FC<ProgressBarProps> = ({ progress }) => {
   return (
-    <div className="h-2 w-full bg-gray-200 rounded overflow-hidden mb-2">
+    <div className="h-2 w-full bg-gray-200 rounded overflow-hidden">
       <div
-        className="h-full bg-blue-600 transition-all duration-300"
+        className="h-full bg-blue-400 transition-all duration-300"
         style={{ width: `${Math.min(Math.max(progress, 0), 1) * 100}%` }}
       />
     </div>
